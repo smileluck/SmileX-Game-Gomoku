@@ -25,8 +25,8 @@
 
 1. **克隆或下载项目**
    ```bash
-   git clone https://github.com/your-username/holographic-gomoku.git
-   cd holographic-gomoku
+   git clone https://github.com/SmileX-Project/SmileX-Game-Gomoku.git
+   cd SmileX-Game-Gomoku
    ```
 
 2. **启动本地服务器**
@@ -118,7 +118,7 @@
 
 ## 许可证
 
-MIT License
+Apache License 2.0
 
 ## 贡献
 

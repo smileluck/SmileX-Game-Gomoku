@@ -98,8 +98,8 @@ this.gameState = {
 
 1. **克隆项目**
    ```bash
-   git clone https://github.com/your-username/holographic-gomoku.git
-   cd holographic-gomoku
+   git clone https://github.com/SmileX-Project/SmileX-Game-Gomoku.git
+   cd SmileX-Game-Gomoku
    ```
 
 2. **启动本地服务器**
