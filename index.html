@@ -294,6 +294,10 @@
                 this.cursor = null;
                 this.isCursorLocked = false;
                 
+                // 手势状态跟踪
+                this.isPinching = false; // 当前是否处于捏合状态
+                this.wasPinching = false; // 上一帧是否处于捏合状态
+                
                 // 初始化应用
                 this.init();
             }
@@ -787,8 +791,12 @@
                 boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
                 boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
                 
+                // 更新当前捏合状态
+                this.wasPinching = this.isPinching;
+                this.isPinching = distance < 0.05; // 拇指与食指距离小于5%时判定为捏合
+                
                 // 磁吸锁定逻辑
-                if (distance < 0.05) { // 拇指与食指距离小于5%
+                if (this.isPinching) {
                     if (!this.isCursorLocked) {
                         // 吸附到最近的网格点
                         const lockedX = boardX * this.gridSize - halfSize + this.gridSize / 2;
@@ -796,13 +804,15 @@
                         this.cursor.position.set(lockedX, 5, lockedZ);
                         this.isCursorLocked = true;
                     }
-                    
-                    // 检查是否可以落子
-                    if (this.gameState.board[boardX][boardZ] === 0 && this.gameState.currentPlayer === 1) {
-                        // 触发落子
-                        this.placePiece(boardX, boardZ, 1);
-                    }
                 } else {
+                    // 检测捏合松开手势（从捏合状态变为非捏合状态）
+                    if (this.wasPinching && this.isCursorLocked) {
+                        // 检查是否可以落子
+                        if (this.gameState.board[boardX][boardZ] === 0 && this.gameState.currentPlayer === 1) {
+                            // 触发落子
+                            this.placePiece(boardX, boardZ, 1);
+                        }
+                    }
                     this.isCursorLocked = false;
                 }
             }
@@ -919,7 +929,17 @@
              * @param {number} player - 玩家类型 (1: 玩家, 2: AI)
              */
             placePiece(x, z, player) {
-                if (this.gameState.gameOver || this.gameState.board[x][z] !== 0) return;
+                // 检查游戏是否结束
+                if (this.gameState.gameOver) return;
+                
+                // 检查坐标是否在棋盘范围内
+                if (x < 0 || x >= this.boardSize || z < 0 || z >= this.boardSize) {
+                    console.warn('落子位置超出棋盘范围:', x, z);
+                    return;
+                }
+                
+                // 检查位置是否为空
+                if (this.gameState.board[x][z] !== 0) return;
                 
                 // 更新棋盘状态
                 this.gameState.board[x][z] = player;
