@@ -1,0 +1,1461 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>全息手势五子棋</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            overflow: hidden;
+            background: #000;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* Three.js 3D场景画布 */
+        #three-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        /* 手部骨骼绘制画布 */
+        #hand-canvas {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 2;
+            pointer-events: none;
+        }
+
+        /* 游戏状态提示 */
+        #game-info {
+            position: absolute;
+            top: 20px;
+            left: 20px;
+            z-index: 3;
+            color: cyan;
+            font-size: 18px;
+            text-shadow: 0 0 10px cyan;
+        }
+
+        /* 重置按钮 */
+        #reset-btn {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            z-index: 3;
+            padding: 10px 20px;
+            background: rgba(0, 255, 255, 0.2);
+            border: 1px solid cyan;
+            color: cyan;
+            font-size: 16px;
+            cursor: pointer;
+            border-radius: 5px;
+            transition: all 0.3s ease;
+            text-shadow: 0 0 10px cyan;
+        }
+
+        #reset-btn:hover {
+            background: rgba(0, 255, 255, 0.4);
+            box-shadow: 0 0 20px cyan;
+        }
+
+        /* 操作说明 */
+        #game-controls {
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            z-index: 3;
+            background: rgba(0, 0, 0, 0.7);
+            border: 1px solid cyan;
+            border-radius: 10px;
+            padding: 0;
+            color: cyan;
+            font-size: 14px;
+            max-width: 400px;
+            text-shadow: 0 0 5px cyan;
+            backdrop-filter: blur(5px);
+            transition: all 0.3s ease;
+        }
+
+        /* 标题栏样式 */
+        #game-controls .controls-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            border-bottom: 1px solid rgba(0, 255, 255, 0.3);
+            cursor: pointer;
+            border-radius: 9px 9px 0 0;
+            transition: all 0.3s ease;
+        }
+
+        #game-controls .controls-header:hover {
+            background: rgba(0, 255, 255, 0.1);
+        }
+
+        #game-controls h3 {
+            margin: 0;
+            font-size: 16px;
+        }
+
+        /* 折叠/展开按钮样式 */
+        #game-controls .toggle-btn {
+            background: transparent;
+            border: none;
+            color: cyan;
+            font-size: 14px;
+            cursor: pointer;
+            padding: 2px 5px;
+            border-radius: 3px;
+            transition: all 0.3s ease;
+        }
+
+        #game-controls .toggle-btn:hover {
+            background: rgba(0, 255, 255, 0.2);
+            transform: scale(1.1);
+        }
+
+        /* 内容区域样式 */
+        #game-controls #controls-content {
+            padding: 15px;
+            max-height: 300px;
+            overflow-y: auto;
+            transition: all 0.3s ease;
+        }
+
+        /* 折叠状态样式 */
+        #game-controls #controls-content.collapsed {
+            padding: 0;
+            max-height: 0;
+            overflow: hidden;
+        }
+
+        /* 旋转箭头样式 */
+        #game-controls .toggle-btn.collapsed {
+            transform: rotate(-90deg);
+        }
+
+        /* 控制部分样式 */
+        #game-controls .control-section {
+            margin-bottom: 10px;
+        }
+
+        #game-controls .control-section h4 {
+            margin: 5px 0;
+            font-size: 15px;
+            color: #00ffff;
+        }
+
+        #game-controls ul {
+            margin: 5px 0;
+            padding-left: 20px;
+        }
+
+        #game-controls li {
+            margin: 3px 0;
+            line-height: 1.4;
+        }
+
+        /* 自定义滚动条 */
+        #game-controls #controls-content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        #game-controls #controls-content::-webkit-scrollbar-track {
+            background: rgba(0, 255, 255, 0.1);
+            border-radius: 3px;
+        }
+
+        #game-controls #controls-content::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 255, 0.5);
+            border-radius: 3px;
+        }
+
+        #game-controls #controls-content::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 255, 0.7);
+        }
+    </style>
+</head>
+<body>
+    <!-- Three.js 3D场景 -->
+    <canvas id="three-canvas"></canvas>
+    
+    <!-- 手部骨骼绘制 -->
+    <canvas id="hand-canvas"></canvas>
+    
+    <!-- 游戏状态信息 -->
+    <div id="game-info">
+        <div>当前回合：玩家</div>
+        <div>游戏状态：进行中</div>
+    </div>
+    
+    <!-- 重置按钮 -->
+    <button id="reset-btn">重置游戏</button>
+    
+    <!-- 操作说明 -->
+    <div id="game-controls">
+        <div class="controls-header">
+            <h3>操作说明</h3>
+            <button id="toggle-controls" class="toggle-btn">▼</button>
+        </div>
+        
+        <div id="controls-content">
+            <div class="control-section">
+                <h4>游戏规则</h4>
+                <ul>
+                    <li>五子棋规则：先连成五子一线（横、竖、斜）者获胜</li>
+                    <li>玩家执青色棋子，AI执红色棋子</li>
+                    <li>玩家先行，然后轮流落子</li>
+                    <li>点击"重置游戏"可重新开始</li>
+                </ul>
+            </div>
+            
+            <div class="control-section">
+                <h4>手势操作</h4>
+                <ul>
+                    <li>使用食指指向棋盘区域控制光标</li>
+                    <li>拇指和食指靠近（捏合）锁定落子位置</li>
+                    <li>保持捏合状态完成落子</li>
+                    <li>系统会自动识别手部动作</li>
+                </ul>
+            </div>
+            
+            <div class="control-section">
+                <h4>鼠标操作</h4>
+                <ul>
+                    <li>移动鼠标控制光标位置</li>
+                    <li>按住鼠标左键锁定落子位置</li>
+                    <li>松开鼠标左键完成落子</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 引入外部库 -->
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/build/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/EffectComposer.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/RenderPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.158.0/examples/js/postprocessing/UnrealBloomPass.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/hands.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1633559471/camera_utils.min.js"></script>
+    
+    <script>
+        // 全息手势五子棋应用
+        class HolographicGomoku {
+            constructor() {
+                // 初始化游戏状态
+                this.gameState = {
+                    board: Array(15).fill().map(() => Array(15).fill(0)), // 0: 空, 1: 玩家, 2: AI
+                    currentPlayer: 1, // 1: 玩家, 2: AI
+                    gameOver: false,
+                    winner: 0
+                };
+                
+                // 3D场景相关变量
+                this.scene = null;
+                this.camera = null;
+                this.renderer = null;
+                this.controls = null;
+                this.composer = null;
+                
+                // 手势追踪相关变量
+                this.hands = null;
+                this.cameraUtils = null;
+                this.videoElement = null;
+                this.isCameraReady = false;
+                
+                // Canvas元素
+                this.threeCanvas = document.getElementById('three-canvas');
+                this.handCanvas = document.getElementById('hand-canvas');
+                this.handCtx = this.handCanvas.getContext('2d');
+                
+                // 棋盘和棋子相关
+                this.boardSize = 15;
+                this.gridSize = 40;
+                this.pieces = [];
+                this.cursor = null;
+                this.isCursorLocked = false;
+                
+                // 初始化应用
+                this.init();
+            }
+            
+            /**
+             * 初始化应用
+             */
+            init() {
+                this.initThreeJS();
+                this.initBoard();
+                this.initCursor();
+                this.initMediaPipe();
+                this.initEventListeners();
+                this.animate();
+            }
+            
+            /**
+             * 初始化Three.js场景
+             */
+            initThreeJS() {
+                // 创建场景
+                this.scene = new THREE.Scene();
+                
+                // 设置深空径向渐变背景
+                this.scene.background = new THREE.Color(0x000000);
+                
+                // 创建相机
+                this.camera = new THREE.PerspectiveCamera(
+                    75,
+                    window.innerWidth / window.innerHeight,
+                    0.1,
+                    1000
+                );
+                this.camera.position.set(0, 200, 400);
+                this.camera.lookAt(0, 0, 0);
+                
+                // 创建渲染器
+                this.renderer = new THREE.WebGLRenderer({
+                    canvas: this.threeCanvas,
+                    antialias: true,
+                    alpha: true
+                });
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.renderer.setPixelRatio(window.devicePixelRatio);
+                this.renderer.shadowMap.enabled = true;
+                
+                // 添加轨道控制器（用于调试）
+                // 注意：OrbitControls可能需要额外配置，这里添加容错处理
+                if (typeof THREE.OrbitControls !== 'undefined') {
+                    this.controls = new THREE.OrbitControls(this.camera, this.renderer.domElement);
+                    this.controls.enableDamping = true;
+                    this.controls.dampingFactor = 0.05;
+                    this.controls.minDistance = 200;
+                    this.controls.maxDistance = 800;
+                } else {
+                    // 如果OrbitControls不可用，创建一个简单的控制器模拟
+                    this.controls = {
+                        update: () => {}
+                    };
+                    console.warn('OrbitControls not available, using dummy controller');
+                }
+                
+                // 添加环境光
+                const ambientLight = new THREE.AmbientLight(0x404040, 1);
+                this.scene.add(ambientLight);
+                
+                // 添加方向光
+                const directionalLight = new THREE.DirectionalLight(0xffffff, 1);
+                directionalLight.position.set(100, 200, 100);
+                this.scene.add(directionalLight);
+                
+                // 添加点光源（增强辉光效果）
+                const pointLight = new THREE.PointLight(0x00ffff, 2, 1000);
+                pointLight.position.set(0, 100, 0);
+                this.scene.add(pointLight);
+                
+                // 初始化辉光后处理
+                this.initBloomEffect();
+                
+                // 监听窗口大小变化
+                window.addEventListener('resize', () => this.onWindowResize());
+            }
+            
+            /**
+             * 初始化辉光效果
+             */
+            initBloomEffect() {
+                // 检查postprocessing模块是否可用
+                if (typeof THREE.EffectComposer !== 'undefined' && 
+                    typeof THREE.RenderPass !== 'undefined' && 
+                    typeof THREE.UnrealBloomPass !== 'undefined') {
+                    
+                    // 创建渲染通道
+                    const renderPass = new THREE.RenderPass(this.scene, this.camera);
+                    
+                    // 创建辉光通道
+                    const bloomPass = new THREE.UnrealBloomPass(
+                        new THREE.Vector2(window.innerWidth, window.innerHeight),
+                        1.5, // 辉光强度
+                        0.4, // 辉光半径
+                        0.85 // 阈值
+                    );
+                    
+                    // 创建效果组合器
+                    this.composer = new THREE.EffectComposer(this.renderer);
+                    this.composer.addPass(renderPass);
+                    this.composer.addPass(bloomPass);
+                } else {
+                    // 如果postprocessing不可用，使用默认渲染器
+                    this.composer = null;
+                    console.warn('Postprocessing modules not available, using default renderer');
+                }
+            }
+            
+            /**
+             * 窗口大小变化处理
+             */
+            onWindowResize() {
+                this.camera.aspect = window.innerWidth / window.innerHeight;
+                this.camera.updateProjectionMatrix();
+                this.renderer.setSize(window.innerWidth, window.innerHeight);
+                this.composer.setSize(window.innerWidth, window.innerHeight);
+                
+                // 更新手部画布大小
+                this.handCanvas.width = window.innerWidth;
+                this.handCanvas.height = window.innerHeight;
+            }
+            
+            /**
+             * 初始化棋盘
+             */
+            initBoard() {
+                const boardGroup = new THREE.Group();
+                
+                // 计算棋盘尺寸
+                const totalSize = this.boardSize * this.gridSize;
+                const halfSize = totalSize / 2;
+                
+                // 创建棋盘底面（半透明发光）
+                const boardGeometry = new THREE.PlaneGeometry(totalSize, totalSize);
+                const boardMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.1,
+                    side: THREE.DoubleSide
+                });
+                const board = new THREE.Mesh(boardGeometry, boardMaterial);
+                board.rotation.x = -Math.PI / 2;
+                boardGroup.add(board);
+                
+                // 创建网格线
+                const lineMaterial = new THREE.LineBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                
+                // 创建垂直线
+                for (let x = 0; x <= this.boardSize; x++) {
+                    const points = [];
+                    const posX = x * this.gridSize - halfSize;
+                    points.push(new THREE.Vector3(posX, 0.1, -halfSize));
+                    points.push(new THREE.Vector3(posX, 0.1, halfSize));
+                    
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, lineMaterial);
+                    boardGroup.add(line);
+                }
+                
+                // 创建水平线
+                for (let z = 0; z <= this.boardSize; z++) {
+                    const points = [];
+                    const posZ = z * this.gridSize - halfSize;
+                    points.push(new THREE.Vector3(-halfSize, 0.1, posZ));
+                    points.push(new THREE.Vector3(halfSize, 0.1, posZ));
+                    
+                    const geometry = new THREE.BufferGeometry().setFromPoints(points);
+                    const line = new THREE.Line(geometry, lineMaterial);
+                    boardGroup.add(line);
+                }
+                
+                // 创建棋盘边框
+                const borderGeometry = new THREE.BoxGeometry(totalSize + 10, 5, totalSize + 10);
+                const borderMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.3,
+                    wireframe: true
+                });
+                const border = new THREE.Mesh(borderGeometry, borderMaterial);
+                boardGroup.add(border);
+                
+                // 添加到场景
+                this.scene.add(boardGroup);
+            }
+            
+            /**
+             * 初始化光标
+             */
+            initCursor() {
+                // 创建光标几何体
+                const cursorGeometry = new THREE.CircleGeometry(8, 32);
+                const cursorMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                
+                this.cursor = new THREE.Mesh(cursorGeometry, cursorMaterial);
+                this.cursor.rotation.x = -Math.PI / 2;
+                this.cursor.position.y = 5;
+                
+                // 添加光标辉光效果
+                const glowGeometry = new THREE.CircleGeometry(12, 32);
+                const glowMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.3
+                });
+                const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+                glow.rotation.x = -Math.PI / 2;
+                glow.position.y = 4.9;
+                this.cursor.add(glow);
+                
+                // 添加到场景
+                this.scene.add(this.cursor);
+            }
+            
+            /**
+             * 创建棋子
+             * @param {number} x - 棋盘X坐标
+             * @param {number} z - 棋盘Z坐标
+             * @param {number} player - 玩家类型 (1: 玩家, 2: AI)
+             */
+            createPiece(x, z, player) {
+                // 转换为3D坐标
+                const totalSize = this.boardSize * this.gridSize;
+                const halfSize = totalSize / 2;
+                const posX = x * this.gridSize - halfSize + this.gridSize / 2;
+                const posZ = z * this.gridSize - halfSize + this.gridSize / 2;
+                
+                // 选择棋子颜色
+                const color = player === 1 ? 0x00ffff : 0xff0000;
+                
+                // 创建棋子几何体
+                const pieceGeometry = new THREE.SphereGeometry(15, 32, 32);
+                const pieceMaterial = new THREE.MeshBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.9
+                });
+                
+                const piece = new THREE.Mesh(pieceGeometry, pieceMaterial);
+                piece.position.set(posX, 15, posZ);
+                
+                // 添加棋子辉光效果
+                const glowGeometry = new THREE.SphereGeometry(18, 32, 32);
+                const glowMaterial = new THREE.MeshBasicMaterial({
+                    color: color,
+                    transparent: true,
+                    opacity: 0.4
+                });
+                const glow = new THREE.Mesh(glowGeometry, glowMaterial);
+                piece.add(glow);
+                
+                // 添加到场景和棋子数组
+                this.scene.add(piece);
+                this.pieces.push(piece);
+                
+                return piece;
+            }
+            
+            /**
+             * 初始化MediaPipe手势追踪
+             */
+            initMediaPipe() {
+                // 检查MediaPipe Hands是否可用
+                if (typeof window.Hands !== 'undefined') {
+                    // 创建MediaPipe Hands实例
+                    this.hands = new window.Hands({
+                        locateFile: (file) => {
+                            return `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1646424915/${file}`;
+                        }
+                    });
+                    
+                    // 配置Hands模型
+                    this.hands.setOptions({
+                        maxNumHands: 1,
+                        modelComplexity: 1,
+                        minDetectionConfidence: 0.7,
+                        minTrackingConfidence: 0.7
+                    });
+                    
+                    // 设置结果回调
+                    this.hands.onResults((results) => {
+                        this.onHandResults(results);
+                    });
+                } else {
+                    // 如果Hands不可用，使用鼠标模拟
+                    this.hands = null;
+                    console.warn('MediaPipe Hands not available, using mouse simulation');
+                    this.initMouseSimulation();
+                }
+                
+                // 只有当Hands可用时，才初始化摄像头
+                if (this.hands) {
+                    // 创建视频元素（用于摄像头输入）
+                    this.videoElement = document.createElement('video');
+                    this.videoElement.style.position = 'absolute';
+                    this.videoElement.style.top = '0';
+                    this.videoElement.style.left = '0';
+                    this.videoElement.style.width = '0';
+                    this.videoElement.style.height = '0';
+                    this.videoElement.style.pointerEvents = 'none';
+                    document.body.appendChild(this.videoElement);
+                    
+                    // 初始化摄像头
+                    this.initCamera();
+                }
+            }
+            
+            /**
+             * 初始化摄像头
+             */
+            async initCamera() {
+                try {
+                    // 获取摄像头视频流
+                    const stream = await navigator.mediaDevices.getUserMedia({
+                        video: {
+                            width: 1280,
+                            height: 720
+                        }
+                    });
+                    
+                    // 设置视频源
+                    this.videoElement.srcObject = stream;
+                    await this.videoElement.play();
+                    
+                    // 更新手部画布大小
+                    this.handCanvas.width = window.innerWidth;
+                    this.handCanvas.height = window.innerHeight;
+                    
+                    this.isCameraReady = true;
+                    
+                    // 开始手势追踪
+                    this.startHandsTracking();
+                } catch (error) {
+                    console.error('摄像头初始化失败:', error);
+                    alert('无法访问摄像头，请确保已授予摄像头权限');
+                }
+            }
+            
+            /**
+             * 开始手势追踪
+             */
+            startHandsTracking() {
+                if (!this.isCameraReady) return;
+                
+                const trackHands = async () => {
+                    try {
+                        await this.hands.send({
+                            image: this.videoElement
+                        });
+                    } catch (error) {
+                        console.error('手势追踪失败:', error);
+                    }
+                    requestAnimationFrame(trackHands);
+                };
+                
+                trackHands();
+            }
+            
+            /**
+             * 手势追踪结果处理
+             * @param {Object} results - MediaPipe Hands结果
+             */
+            onHandResults(results) {
+                // 清空手部画布
+                this.handCtx.clearRect(0, 0, this.handCanvas.width, this.handCanvas.height);
+                
+                // 如果检测到手部
+                if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                    const landmarks = results.multiHandLandmarks[0];
+                    
+                    // 绘制手部骨骼
+                    this.drawHandSkeleton(landmarks);
+                    
+                    // 更新光标位置
+                    this.updateCursorPosition(landmarks);
+                }
+            }
+            
+            /**
+             * 绘制手部骨骼
+             * @param {Array} landmarks - 手部骨骼关键点
+             */
+            drawHandSkeleton(landmarks) {
+                // 定义手部骨骼连接
+                const connections = [
+                    [0, 1], [1, 2], [2, 3], [3, 4], // 拇指
+                    [0, 5], [5, 6], [6, 7], [7, 8], // 食指
+                    [0, 9], [9, 10], [10, 11], [11, 12], // 中指
+                    [0, 13], [13, 14], [14, 15], [15, 16], // 无名指
+                    [0, 17], [17, 18], [18, 19], [19, 20] // 小指
+                ];
+                
+                // 设置线条样式
+                this.handCtx.strokeStyle = 'cyan';
+                this.handCtx.lineWidth = 3;
+                this.handCtx.shadowColor = 'cyan';
+                this.handCtx.shadowBlur = 10;
+                
+                // 绘制连接
+                connections.forEach(([startIdx, endIdx]) => {
+                    const start = landmarks[startIdx];
+                    const end = landmarks[endIdx];
+                    
+                    this.handCtx.beginPath();
+                    this.handCtx.moveTo(start.x * this.handCanvas.width, start.y * this.handCanvas.height);
+                    this.handCtx.lineTo(end.x * this.handCanvas.width, end.y * this.handCanvas.height);
+                    this.handCtx.stroke();
+                });
+                
+                // 绘制关键点
+                this.handCtx.fillStyle = 'cyan';
+                landmarks.forEach((landmark) => {
+                    this.handCtx.beginPath();
+                    this.handCtx.arc(
+                        landmark.x * this.handCanvas.width,
+                        landmark.y * this.handCanvas.height,
+                        5,
+                        0,
+                        2 * Math.PI
+                    );
+                    this.handCtx.fill();
+                });
+            }
+            
+            /**
+             * 更新光标位置
+             * @param {Array} landmarks - 手部骨骼关键点
+             */
+            updateCursorPosition(landmarks) {
+                if (!this.cursor || this.gameState.gameOver) return;
+                
+                // 获取食指指尖（索引8）和拇指指尖（索引4）坐标
+                const indexTip = landmarks[8];
+                const thumbTip = landmarks[4];
+                
+                // 计算屏幕坐标（翻转Y轴，因为MediaPipe使用的是 normalized coordinates，Y轴向下）
+                const screenX = indexTip.x * window.innerWidth;
+                const screenY = (1 - indexTip.y) * window.innerHeight;
+                
+                // 计算拇指与食指的距离（归一化）
+                const distance = Math.hypot(
+                    thumbTip.x - indexTip.x,
+                    thumbTip.y - indexTip.y
+                );
+                
+                // 转换屏幕坐标到3D空间
+                const vector = new THREE.Vector3(
+                    (screenX / window.innerWidth) * 2 - 1,
+                    -(screenY / window.innerHeight) * 2 + 1,
+                    0.5
+                );
+                
+                vector.unproject(this.camera);
+                
+                // 计算射线
+                const raycaster = new THREE.Raycaster(
+                    this.camera.position,
+                    vector.sub(this.camera.position).normalize()
+                );
+                
+                // 创建棋盘平面用于射线检测
+                const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+                const intersectionPoint = new THREE.Vector3();
+                raycaster.ray.intersectPlane(plane, intersectionPoint);
+                
+                // 更新光标位置
+                this.cursor.position.copy(intersectionPoint);
+                
+                // 计算棋盘坐标
+                const totalSize = this.boardSize * this.gridSize;
+                const halfSize = totalSize / 2;
+                
+                let boardX = Math.round((intersectionPoint.x + halfSize - this.gridSize / 2) / this.gridSize);
+                let boardZ = Math.round((intersectionPoint.z + halfSize - this.gridSize / 2) / this.gridSize);
+                
+                // 限制在棋盘范围内
+                boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
+                boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
+                
+                // 磁吸锁定逻辑
+                if (distance < 0.05) { // 拇指与食指距离小于5%
+                    if (!this.isCursorLocked) {
+                        // 吸附到最近的网格点
+                        const lockedX = boardX * this.gridSize - halfSize + this.gridSize / 2;
+                        const lockedZ = boardZ * this.gridSize - halfSize + this.gridSize / 2;
+                        this.cursor.position.set(lockedX, 5, lockedZ);
+                        this.isCursorLocked = true;
+                    }
+                    
+                    // 检查是否可以落子
+                    if (this.gameState.board[boardX][boardZ] === 0 && this.gameState.currentPlayer === 1) {
+                        // 触发落子
+                        this.placePiece(boardX, boardZ, 1);
+                    }
+                } else {
+                    this.isCursorLocked = false;
+                }
+            }
+            
+            /**
+             * 初始化鼠标模拟
+             */
+            initMouseSimulation() {
+                let isMouseDown = false;
+                
+                // 鼠标移动事件
+                this.threeCanvas.addEventListener('mousemove', (event) => {
+                    if (this.gameState.gameOver) return;
+                    
+                    const rect = this.threeCanvas.getBoundingClientRect();
+                    const screenX = event.clientX - rect.left;
+                    const screenY = event.clientY - rect.top;
+                    
+                    // 转换屏幕坐标到3D空间
+                    const vector = new THREE.Vector3(
+                        (screenX / this.threeCanvas.width) * 2 - 1,
+                        -(screenY / this.threeCanvas.height) * 2 + 1,
+                        0.5
+                    );
+                    
+                    vector.unproject(this.camera);
+                    
+                    // 计算射线
+                    const raycaster = new THREE.Raycaster(
+                        this.camera.position,
+                        vector.sub(this.camera.position).normalize()
+                    );
+                    
+                    // 创建棋盘平面用于射线检测
+                    const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+                    const intersectionPoint = new THREE.Vector3();
+                    raycaster.ray.intersectPlane(plane, intersectionPoint);
+                    
+                    // 更新光标位置
+                    this.cursor.position.copy(intersectionPoint);
+                    
+                    // 磁吸锁定逻辑
+                    if (isMouseDown) {
+                        if (!this.isCursorLocked) {
+                            // 计算棋盘坐标
+                            const totalSize = this.boardSize * this.gridSize;
+                            const halfSize = totalSize / 2;
+                            
+                            let boardX = Math.round((intersectionPoint.x + halfSize - this.gridSize / 2) / this.gridSize);
+                            let boardZ = Math.round((intersectionPoint.z + halfSize - this.gridSize / 2) / this.gridSize);
+                            
+                            // 限制在棋盘范围内
+                            boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
+                            boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
+                            
+                            // 吸附到最近的网格点
+                            const lockedX = boardX * this.gridSize - halfSize + this.gridSize / 2;
+                            const lockedZ = boardZ * this.gridSize - halfSize + this.gridSize / 2;
+                            this.cursor.position.set(lockedX, 5, lockedZ);
+                            this.isCursorLocked = true;
+                        }
+                    } else {
+                        this.isCursorLocked = false;
+                    }
+                });
+                
+                // 鼠标按下事件
+                this.threeCanvas.addEventListener('mousedown', () => {
+                    isMouseDown = true;
+                });
+                
+                // 鼠标释放事件
+                this.threeCanvas.addEventListener('mouseup', (event) => {
+                    if (this.gameState.gameOver) return;
+                    
+                    isMouseDown = false;
+                    
+                    // 如果光标已锁定，触发落子
+                    if (this.isCursorLocked) {
+                        // 计算棋盘坐标
+                        const totalSize = this.boardSize * this.gridSize;
+                        const halfSize = totalSize / 2;
+                        
+                        let boardX = Math.round((this.cursor.position.x + halfSize - this.gridSize / 2) / this.gridSize);
+                        let boardZ = Math.round((this.cursor.position.z + halfSize - this.gridSize / 2) / this.gridSize);
+                        
+                        // 限制在棋盘范围内
+                        boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
+                        boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
+                        
+                        // 检查是否可以落子
+                        if (this.gameState.board[boardX][boardZ] === 0 && this.gameState.currentPlayer === 1) {
+                            // 触发落子
+                            this.placePiece(boardX, boardZ, 1);
+                        }
+                    }
+                });
+            }
+            
+            /**
+             * 初始化事件监听器
+             */
+            initEventListeners() {
+                // 重置按钮事件
+                document.getElementById('reset-btn').addEventListener('click', () => {
+                    this.resetGame();
+                });
+            }
+            
+            /**
+             * 落子
+             * @param {number} x - 棋盘X坐标
+             * @param {number} z - 棋盘Z坐标
+             * @param {number} player - 玩家类型 (1: 玩家, 2: AI)
+             */
+            placePiece(x, z, player) {
+                if (this.gameState.gameOver || this.gameState.board[x][z] !== 0) return;
+                
+                // 更新棋盘状态
+                this.gameState.board[x][z] = player;
+                
+                // 播放落子特效
+                if (player === 1) {
+                    // 玩家落子 - 全息震波效果
+                    this.playPlayerPlacementEffect(x, z);
+                } else {
+                    // AI落子 - 激光轨道效果
+                    this.playAiPlacementEffect(x, z);
+                }
+                
+                // 创建棋子
+                this.createPiece(x, z, player);
+                
+                // 检查胜负
+                if (this.checkWin(x, z, player)) {
+                    this.gameState.gameOver = true;
+                    this.gameState.winner = player;
+                    this.updateGameInfo();
+                    return;
+                }
+                
+                // 检查平局
+                if (this.isBoardFull()) {
+                    this.gameState.gameOver = true;
+                    this.gameState.winner = 0;
+                    this.updateGameInfo();
+                    return;
+                }
+                
+                // 切换玩家
+                this.gameState.currentPlayer = player === 1 ? 2 : 1;
+                this.updateGameInfo();
+                
+                // 如果是AI回合，延迟执行AI落子
+                if (this.gameState.currentPlayer === 2) {
+                    setTimeout(() => {
+                        this.aiMove();
+                    }, 1000);
+                }
+            }
+            
+            /**
+             * 玩家落子特效 - 全息震波
+             * @param {number} x - 落子X坐标
+             * @param {number} z - 落子Z坐标
+             */
+            playPlayerPlacementEffect(x, z) {
+                // 转换为3D坐标
+                const totalSize = this.boardSize * this.gridSize;
+                const halfSize = totalSize / 2;
+                const posX = x * this.gridSize - halfSize + this.gridSize / 2;
+                const posZ = z * this.gridSize - halfSize + this.gridSize / 2;
+                
+                // 创建震波圆环
+                const ringGeometry = new THREE.RingGeometry(0, 10, 32);
+                const ringMaterial = new THREE.MeshBasicMaterial({
+                    color: 0x00ffff,
+                    transparent: true,
+                    opacity: 0.8,
+                    side: THREE.DoubleSide
+                });
+                
+                const ring = new THREE.Mesh(ringGeometry, ringMaterial);
+                ring.rotation.x = -Math.PI / 2;
+                ring.position.set(posX, 1, posZ);
+                this.scene.add(ring);
+                
+                // 震波动画
+                let scale = 1;
+                let opacity = 0.8;
+                const animateRing = () => {
+                    scale += 0.5;
+                    opacity -= 0.02;
+                    
+                    ring.scale.set(scale, scale, scale);
+                    ring.material.opacity = opacity;
+                    
+                    if (opacity > 0) {
+                        requestAnimationFrame(animateRing);
+                    } else {
+                        this.scene.remove(ring);
+                    }
+                };
+                
+                animateRing();
+            }
+            
+            /**
+             * AI落子特效 - 轨道激光
+             * @param {number} x - 落子X坐标
+             * @param {number} z - 落子Z坐标
+             */
+            playAiPlacementEffect(x, z) {
+                // 转换为3D坐标
+                const totalSize = this.boardSize * this.gridSize;
+                const halfSize = totalSize / 2;
+                const posX = x * this.gridSize - halfSize + this.gridSize / 2;
+                const posZ = z * this.gridSize - halfSize + this.gridSize / 2;
+                
+                // 创建激光起点（天空上方）
+                const startPos = new THREE.Vector3(posX, 200, posZ);
+                const endPos = new THREE.Vector3(posX, 15, posZ);
+                
+                // 创建激光几何体
+                const laserGeometry = new THREE.BufferGeometry().setFromPoints([startPos, endPos]);
+                const laserMaterial = new THREE.LineBasicMaterial({
+                    color: 0xff0000,
+                    linewidth: 3,
+                    transparent: true,
+                    opacity: 1
+                });
+                
+                const laser = new THREE.Line(laserGeometry, laserMaterial);
+                this.scene.add(laser);
+                
+                // 激光动画
+                let opacity = 1;
+                const animateLaser = () => {
+                    opacity -= 0.05;
+                    laser.material.opacity = opacity;
+                    
+                    if (opacity > 0) {
+                        requestAnimationFrame(animateLaser);
+                    } else {
+                        this.scene.remove(laser);
+                    }
+                };
+                
+                animateLaser();
+            }
+            
+            /**
+             * 更新游戏信息显示
+             */
+            updateGameInfo() {
+                const gameInfo = document.getElementById('game-info');
+                let currentPlayerText = '当前回合：';
+                let gameStatusText = '游戏状态：';
+                
+                if (this.gameState.gameOver) {
+                    currentPlayerText += this.gameState.winner === 1 ? '玩家' : this.gameState.winner === 2 ? 'AI' : '平局';
+                    gameStatusText += this.gameState.winner === 0 ? '平局' : '游戏结束';
+                } else {
+                    currentPlayerText += this.gameState.currentPlayer === 1 ? '玩家' : 'AI';
+                    gameStatusText += '进行中';
+                }
+                
+                gameInfo.innerHTML = `
+                    \u003cdiv\u003e${currentPlayerText}\u003c/div\u003e
+                    \u003cdiv\u003e${gameStatusText}\u003c/div\u003e
+                `;
+            }
+            
+            /**
+             * 游戏主循环
+             */
+            animate() {
+                requestAnimationFrame(() => this.animate());
+                
+                // 更新控制器
+                this.controls.update();
+                
+                // 渲染场景
+                if (this.composer) {
+                    this.composer.render();
+                } else {
+                    this.renderer.render(this.scene, this.camera);
+                }
+                
+                // 清空手部画布
+                this.handCtx.clearRect(0, 0, this.handCanvas.width, this.handCanvas.height);
+            }
+            
+            /**
+             * 检查胜负
+             * @param {number} x - 落子X坐标
+             * @param {number} z - 落子Z坐标
+             * @param {number} player - 玩家类型
+             * @returns {boolean} - 是否获胜
+             */
+            checkWin(x, z, player) {
+                const directions = [
+                    [1, 0], // 横向
+                    [0, 1], // 纵向
+                    [1, 1], // 对角线1
+                    [1, -1] // 对角线2
+                ];
+                
+                for (const [dx, dz] of directions) {
+                    let count = 1;
+                    
+                    // 检查正方向
+                    for (let i = 1; i < 5; i++) {
+                        const nx = x + dx * i;
+                        const nz = z + dz * i;
+                        if (nx >= 0 && nx < this.boardSize && nz >= 0 && nz < this.boardSize && this.gameState.board[nx][nz] === player) {
+                            count++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // 检查反方向
+                    for (let i = 1; i < 5; i++) {
+                        const nx = x - dx * i;
+                        const nz = z - dz * i;
+                        if (nx >= 0 && nx < this.boardSize && nz >= 0 && nz < this.boardSize && this.gameState.board[nx][nz] === player) {
+                            count++;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // 连续5个子获胜
+                    if (count >= 5) {
+                        return true;
+                    }
+                }
+                
+                return false;
+            }
+            
+            /**
+             * 检查棋盘是否已满
+             * @returns {boolean} - 棋盘是否已满
+             */
+            isBoardFull() {
+                for (let x = 0; x < this.boardSize; x++) {
+                    for (let z = 0; z < this.boardSize; z++) {
+                        if (this.gameState.board[x][z] === 0) {
+                            return false;
+                        }
+                    }
+                }
+                return true;
+            }
+            
+            /**
+             * AI落子 - 极大极小值算法
+             */
+            aiMove() {
+                if (this.gameState.gameOver) return;
+                
+                const depth = 3; // 搜索深度
+                const { x, z } = this.minimax(depth, -Infinity, Infinity, true);
+                this.placePiece(x, z, 2);
+            }
+            
+            /**
+             * 极大极小值算法（带Alpha-Beta剪枝）
+             * @param {number} depth - 搜索深度
+             * @param {number} alpha - Alpha值
+             * @param {number} beta - Beta值
+             * @param {boolean} isMaximizing - 是否为最大化玩家
+             * @returns {Object} - 最佳落子位置和得分
+             */
+            minimax(depth, alpha, beta, isMaximizing) {
+                // 检查终止条件
+                const winner = this.checkWinner();
+                if (depth === 0 || winner !== 0) {
+                    return { x: -1, z: -1, score: this.evaluateBoard() };
+                }
+                
+                // 获取所有空位
+                const emptyPositions = [];
+                for (let x = 0; x < this.boardSize; x++) {
+                    for (let z = 0; z < this.boardSize; z++) {
+                        if (this.gameState.board[x][z] === 0) {
+                            emptyPositions.push({ x, z });
+                        }
+                    }
+                }
+                
+                if (isMaximizing) {
+                    // AI回合 - 最大化得分
+                    let maxScore = -Infinity;
+                    let bestMove = emptyPositions[0];
+                    
+                    for (const { x, z } of emptyPositions) {
+                        // 模拟落子
+                        this.gameState.board[x][z] = 2;
+                        
+                        // 递归搜索
+                        const { score } = this.minimax(depth - 1, alpha, beta, false);
+                        
+                        // 撤销落子
+                        this.gameState.board[x][z] = 0;
+                        
+                        // 更新最佳移动
+                        if (score > maxScore) {
+                            maxScore = score;
+                            bestMove = { x, z };
+                        }
+                        
+                        // Alpha-Beta剪枝
+                        alpha = Math.max(alpha, score);
+                        if (beta <= alpha) {
+                            break;
+                        }
+                    }
+                    
+                    return { ...bestMove, score: maxScore };
+                } else {
+                    // 玩家回合 - 最小化得分
+                    let minScore = Infinity;
+                    let bestMove = emptyPositions[0];
+                    
+                    for (const { x, z } of emptyPositions) {
+                        // 模拟落子
+                        this.gameState.board[x][z] = 1;
+                        
+                        // 递归搜索
+                        const { score } = this.minimax(depth - 1, alpha, beta, true);
+                        
+                        // 撤销落子
+                        this.gameState.board[x][z] = 0;
+                        
+                        // 更新最佳移动
+                        if (score < minScore) {
+                            minScore = score;
+                            bestMove = { x, z };
+                        }
+                        
+                        // Alpha-Beta剪枝
+                        beta = Math.min(beta, score);
+                        if (beta <= alpha) {
+                            break;
+                        }
+                    }
+                    
+                    return { ...bestMove, score: minScore };
+                }
+            }
+            
+            /**
+             * 检查当前赢家
+             * @returns {number} - 赢家（0: 无, 1: 玩家, 2: AI）
+             */
+            checkWinner() {
+                for (let x = 0; x < this.boardSize; x++) {
+                    for (let z = 0; z < this.boardSize; z++) {
+                        const player = this.gameState.board[x][z];
+                        if (player !== 0 && this.checkWin(x, z, player)) {
+                            return player;
+                        }
+                    }
+                }
+                return 0;
+            }
+            
+            /**
+             * 评估棋盘价值
+             * @returns {number} - 棋盘价值得分
+             */
+            evaluateBoard() {
+                const playerScore = this.evaluatePlayer(1);
+                const aiScore = this.evaluatePlayer(2);
+                return aiScore - playerScore;
+            }
+            
+            /**
+             * 评估单个玩家的棋盘价值
+             * @param {number} player - 玩家类型
+             * @returns {number} - 玩家得分
+             */
+            evaluatePlayer(player) {
+                let score = 0;
+                
+                // 评估每个位置
+                for (let x = 0; x < this.boardSize; x++) {
+                    for (let z = 0; z < this.boardSize; z++) {
+                        if (this.gameState.board[x][z] === player) {
+                            // 中心位置奖励
+                            const centerDist = Math.hypot(x - 7, z - 7);
+                            score += (15 - centerDist) * 2;
+                            
+                            // 评估四个方向
+                            score += this.evaluatePosition(x, z, player);
+                        }
+                    }
+                }
+                
+                return score;
+            }
+            
+            /**
+             * 评估单个位置的价值
+             * @param {number} x - 位置X坐标
+             * @param {number} z - 位置Z坐标
+             * @param {number} player - 玩家类型
+             * @returns {number} - 位置价值
+             */
+            evaluatePosition(x, z, player) {
+                const directions = [
+                    [1, 0], // 横向
+                    [0, 1], // 纵向
+                    [1, 1], // 对角线1
+                    [1, -1] // 对角线2
+                ];
+                
+                let positionScore = 0;
+                
+                for (const [dx, dz] of directions) {
+                    // 计算连续子的长度和两端是否有空格
+                    let count = 1;
+                    let openEnds = 0;
+                    
+                    // 检查正方向
+                    let i = 1;
+                    while (x + dx * i >= 0 && x + dx * i < this.boardSize && z + dz * i >= 0 && z + dz * i < this.boardSize) {
+                        const nx = x + dx * i;
+                        const nz = z + dz * i;
+                        
+                        if (this.gameState.board[nx][nz] === player) {
+                            count++;
+                            i++;
+                        } else if (this.gameState.board[nx][nz] === 0) {
+                            openEnds++;
+                            break;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // 检查反方向
+                    i = 1;
+                    while (x - dx * i >= 0 && x - dx * i < this.boardSize && z - dz * i >= 0 && z - dz * i < this.boardSize) {
+                        const nx = x - dx * i;
+                        const nz = z - dz * i;
+                        
+                        if (this.gameState.board[nx][nz] === player) {
+                            count++;
+                            i++;
+                        } else if (this.gameState.board[nx][nz] === 0) {
+                            openEnds++;
+                            break;
+                        } else {
+                            break;
+                        }
+                    }
+                    
+                    // 根据连续子长度和开放端数量计算得分
+                    positionScore += this.getPatternScore(count, openEnds);
+                }
+                
+                return positionScore;
+            }
+            
+            /**
+             * 根据连续子模式计算得分
+             * @param {number} count - 连续子数量
+             * @param {number} openEnds - 开放端数量
+             * @returns {number} - 模式得分
+             */
+            getPatternScore(count, openEnds) {
+                if (count >= 5) return 100000; // 五连珠 - 获胜
+                if (count === 4) {
+                    if (openEnds === 2) return 10000; // 活四 - 必胜
+                    if (openEnds === 1) return 1000; // 冲四 - 强威胁
+                }
+                if (count === 3) {
+                    if (openEnds === 2) return 500; // 活三 - 强进攻
+                    if (openEnds === 1) return 100; // 冲三 - 威胁
+                }
+                if (count === 2) {
+                    if (openEnds === 2) return 50; // 活二 - 进攻机会
+                    if (openEnds === 1) return 10; // 冲二 - 弱威胁
+                }
+                if (count === 1) return 1; // 单个子
+                
+                return 0;
+            }
+            
+            /**
+             * 重置游戏
+             */
+            resetGame() {
+                // 重置游戏状态
+                this.gameState = {
+                    board: Array(15).fill().map(() => Array(15).fill(0)),
+                    currentPlayer: 1,
+                    gameOver: false,
+                    winner: 0
+                };
+                
+                // 移除所有棋子
+                this.pieces.forEach(piece => {
+                    this.scene.remove(piece);
+                });
+                this.pieces = [];
+                
+                // 更新游戏信息
+                this.updateGameInfo();
+            }
+        }
+        
+        // 初始化应用
+        window.addEventListener('DOMContentLoaded', () => {
+            new HolographicGomoku();
+            
+            // 初始化操作说明折叠/展开功能
+            initControlsToggle();
+        });
+        
+        /**
+         * 初始化操作说明折叠/展开功能
+         */
+        function initControlsToggle() {
+            // 获取DOM元素
+            const controlsHeader = document.querySelector('#game-controls .controls-header');
+            const toggleBtn = document.querySelector('#game-controls .toggle-btn');
+            const controlsContent = document.querySelector('#game-controls #controls-content');
+            
+            // 确保元素存在
+            if (!controlsHeader || !toggleBtn || !controlsContent) {
+                console.warn('操作说明元素未找到，跳过折叠功能初始化');
+                return;
+            }
+            
+            // 定义切换函数
+            const toggleControls = () => {
+                // 切换内容区域的折叠状态
+                controlsContent.classList.toggle('collapsed');
+                // 切换按钮的折叠状态
+                toggleBtn.classList.toggle('collapsed');
+                // 切换按钮文本
+                toggleBtn.textContent = controlsContent.classList.contains('collapsed') ? '▶' : '▼';
+            };
+            
+            // 添加点击事件监听器
+            controlsHeader.addEventListener('click', toggleControls);
+            toggleBtn.addEventListener('click', toggleControls);
+        }
+    </script>
+</body>
+</html>
