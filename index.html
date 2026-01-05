@@ -281,6 +281,8 @@
                 this.cameraUtils = null;
                 this.videoElement = null;
                 this.isCameraReady = false;
+                this.handDetected = false; // 标记是否检测到了手部
+                this.lastHandDetectedTime = 0; // 最后检测到手部的时间
                 
                 // Canvas元素
                 this.threeCanvas = document.getElementById('three-canvas');
@@ -574,6 +576,9 @@
              * 初始化MediaPipe手势追踪
              */
             initMediaPipe() {
+                // 始终初始化鼠标模拟作为备用方案
+                this.initMouseSimulation();
+                
                 // 检查MediaPipe Hands是否可用
                 if (typeof window.Hands !== 'undefined') {
                     // 创建MediaPipe Hands实例
@@ -595,15 +600,8 @@
                     this.hands.onResults((results) => {
                         this.onHandResults(results);
                     });
-                } else {
-                    // 如果Hands不可用，使用鼠标模拟
-                    this.hands = null;
-                    console.warn('MediaPipe Hands not available, using mouse simulation');
-                    this.initMouseSimulation();
-                }
-                
-                // 只有当Hands可用时，才初始化摄像头
-                if (this.hands) {
+                    
+                    // 初始化摄像头
                     // 创建视频元素（用于摄像头输入）
                     this.videoElement = document.createElement('video');
                     this.videoElement.style.position = 'absolute';
@@ -614,8 +612,14 @@
                     this.videoElement.style.pointerEvents = 'none';
                     document.body.appendChild(this.videoElement);
                     
-                    // 初始化摄像头
-                    this.initCamera();
+                    // 初始化摄像头（使用异步方式，不阻塞主线程）
+                    this.initCamera().catch(error => {
+                        console.error('摄像头初始化失败，仅使用鼠标控制:', error);
+                    });
+                } else {
+                    // 如果Hands不可用，只使用鼠标模拟
+                    this.hands = null;
+                    console.warn('MediaPipe Hands not available, using mouse simulation only');
                 }
             }
             
@@ -646,7 +650,15 @@
                     this.startHandsTracking();
                 } catch (error) {
                     console.error('摄像头初始化失败:', error);
-                    alert('无法访问摄像头，请确保已授予摄像头权限');
+                    console.warn('无法访问摄像头，仅使用鼠标控制');
+                    
+                    // 摄像头初始化失败，确保状态正确
+                    this.isCameraReady = false;
+                    this.handDetected = false;
+                    this.isPinching = false;
+                    this.wasPinching = false;
+                    this.isCursorLocked = false;
+                    // 不使用alert，避免阻塞主线程
                 }
             }
             
@@ -654,17 +666,21 @@
              * 开始手势追踪
              */
             startHandsTracking() {
-                if (!this.isCameraReady) return;
+                if (!this.isCameraReady || !this.hands || !this.videoElement) return;
                 
                 const trackHands = async () => {
                     try {
-                        await this.hands.send({
-                            image: this.videoElement
-                        });
+                        if (this.isCameraReady && this.hands && this.videoElement) {
+                            await this.hands.send({ image: this.videoElement });
+                        }
                     } catch (error) {
                         console.error('手势追踪失败:', error);
                     }
-                    requestAnimationFrame(trackHands);
+                    
+                    // 只有在摄像头准备好且hands实例可用时才继续追踪
+                    if (this.isCameraReady && this.hands && this.videoElement) {
+                        requestAnimationFrame(trackHands);
+                    }
                 };
                 
                 trackHands();
@@ -678,7 +694,7 @@
                 // 清空手部画布
                 this.handCtx.clearRect(0, 0, this.handCanvas.width, this.handCanvas.height);
                 
-                // 如果检测到手部
+                // 更新手部检测状态
                 if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
                     const landmarks = results.multiHandLandmarks[0];
                     
@@ -687,6 +703,18 @@
                     
                     // 更新光标位置
                     this.updateCursorPosition(landmarks);
+                    
+                    // 更新手部检测标志
+                    this.handDetected = true;
+                    this.lastHandDetectedTime = Date.now();
+                } else {
+                    // 未检测到手部
+                    this.handDetected = false;
+                    
+                    // 重置手势状态，避免没有手势时卡死
+                    this.isPinching = false;
+                    this.wasPinching = false;
+                    this.isCursorLocked = false;
                 }
             }
             
@@ -827,6 +855,9 @@
                 this.threeCanvas.addEventListener('mousemove', (event) => {
                     if (this.gameState.gameOver) return;
                     
+                    // 只有当没有检测到手部时，才响应鼠标移动
+                    if (this.handDetected) return;
+                    
                     const rect = this.threeCanvas.getBoundingClientRect();
                     const screenX = event.clientX - rect.left;
                     const screenY = event.clientY - rect.top;
@@ -850,30 +881,28 @@
                     const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
                     const intersectionPoint = new THREE.Vector3();
                     raycaster.ray.intersectPlane(plane, intersectionPoint);
-                    
-                    // 更新光标位置
+                     
+                    // 始终更新光标位置到当前鼠标位置
                     this.cursor.position.copy(intersectionPoint);
                     
                     // 磁吸锁定逻辑
                     if (isMouseDown) {
-                        if (!this.isCursorLocked) {
-                            // 计算棋盘坐标
-                            const totalSize = this.boardSize * this.gridSize;
-                            const halfSize = totalSize / 2;
-                            
-                            let boardX = Math.round((intersectionPoint.x + halfSize - this.gridSize / 2) / this.gridSize);
-                            let boardZ = Math.round((intersectionPoint.z + halfSize - this.gridSize / 2) / this.gridSize);
-                            
-                            // 限制在棋盘范围内
-                            boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
-                            boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
-                            
-                            // 吸附到最近的网格点
-                            const lockedX = boardX * this.gridSize - halfSize + this.gridSize / 2;
-                            const lockedZ = boardZ * this.gridSize - halfSize + this.gridSize / 2;
-                            this.cursor.position.set(lockedX, 5, lockedZ);
-                            this.isCursorLocked = true;
-                        }
+                        // 鼠标按下时，计算并吸附到最近的网格点
+                        const totalSize = this.boardSize * this.gridSize;
+                        const halfSize = totalSize / 2;
+                        
+                        let boardX = Math.round((intersectionPoint.x + halfSize - this.gridSize / 2) / this.gridSize);
+                        let boardZ = Math.round((intersectionPoint.z + halfSize - this.gridSize / 2) / this.gridSize);
+                        
+                        // 限制在棋盘范围内
+                        boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
+                        boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
+                        
+                        // 吸附到最近的网格点
+                        const lockedX = boardX * this.gridSize - halfSize + this.gridSize / 2;
+                        const lockedZ = boardZ * this.gridSize - halfSize + this.gridSize / 2;
+                        this.cursor.position.set(lockedX, 5, lockedZ);
+                        this.isCursorLocked = true;
                     } else {
                         this.isCursorLocked = false;
                     }
@@ -881,32 +910,43 @@
                 
                 // 鼠标按下事件
                 this.threeCanvas.addEventListener('mousedown', () => {
-                    isMouseDown = true;
+                    // 只有当没有检测到手部时，才响应鼠标按下
+                    if (!this.handDetected) {
+                        isMouseDown = true;
+                        // 重置手势状态，确保鼠标操作不受影响
+                        this.isPinching = false;
+                        this.wasPinching = false;
+                    }
                 });
                 
                 // 鼠标释放事件
                 this.threeCanvas.addEventListener('mouseup', (event) => {
                     if (this.gameState.gameOver) return;
                     
-                    isMouseDown = false;
-                    
-                    // 如果光标已锁定，触发落子
-                    if (this.isCursorLocked) {
-                        // 计算棋盘坐标
-                        const totalSize = this.boardSize * this.gridSize;
-                        const halfSize = totalSize / 2;
+                    // 只有当没有检测到手部时，才响应鼠标释放
+                    if (!this.handDetected) {
+                        isMouseDown = false;
                         
-                        let boardX = Math.round((this.cursor.position.x + halfSize - this.gridSize / 2) / this.gridSize);
-                        let boardZ = Math.round((this.cursor.position.z + halfSize - this.gridSize / 2) / this.gridSize);
-                        
-                        // 限制在棋盘范围内
-                        boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
-                        boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
-                        
-                        // 检查是否可以落子
-                        if (this.gameState.board[boardX][boardZ] === 0 && this.gameState.currentPlayer === 1) {
-                            // 触发落子
-                            this.placePiece(boardX, boardZ, 1);
+                        // 如果光标已锁定，触发落子
+                        if (this.isCursorLocked) {
+                            // 计算棋盘坐标
+                            const totalSize = this.boardSize * this.gridSize;
+                            const halfSize = totalSize / 2;
+                            
+                            let boardX = Math.round((this.cursor.position.x + halfSize - this.gridSize / 2) / this.gridSize);
+                            let boardZ = Math.round((this.cursor.position.z + halfSize - this.gridSize / 2) / this.gridSize);
+                            
+                            // 限制在棋盘范围内
+                            boardX = Math.max(0, Math.min(this.boardSize - 1, boardX));
+                            boardZ = Math.max(0, Math.min(this.boardSize - 1, boardZ));
+                            
+                            // 检查是否可以落子
+                            if (this.gameState.board[boardX][boardZ] === 0 && this.gameState.currentPlayer === 1) {
+                                // 触发落子
+                                this.placePiece(boardX, boardZ, 1);
+                            }
+                            // 重置锁定状态
+                            this.isCursorLocked = false;
                         }
                     }
                 });
@@ -1181,14 +1221,35 @@
             }
             
             /**
-             * AI落子 - 极大极小值算法
+             * AI落子 - 极大极小值算法（异步版）
              */
-            aiMove() {
+            async aiMove() {
                 if (this.gameState.gameOver) return;
                 
                 const depth = 3; // 搜索深度
-                const { x, z } = this.minimax(depth, -Infinity, Infinity, true);
-                this.placePiece(x, z, 2);
+                
+                // 使用Promise和setTimeout将AI计算放在异步中执行
+                const bestMove = await new Promise((resolve) => {
+                    // 使用setTimeout将计算放入事件队列，避免阻塞主线程
+                    setTimeout(() => {
+                        const move = this.minimax(depth, -Infinity, Infinity, true);
+                        resolve(move);
+                    }, 0);
+                });
+                
+                const { x, z } = bestMove;
+                
+                // 确保落子位置有效
+                if (x >= 0 && x < this.boardSize && z >= 0 && z < this.boardSize) {
+                    this.placePiece(x, z, 2);
+                } else {
+                    // 无法找到有效位置，检查是否平局
+                    if (this.isBoardFull()) {
+                        this.gameState.gameOver = true;
+                        this.gameState.winner = 0;
+                        this.updateGameInfo();
+                    }
+                }
             }
             
             /**
@@ -1214,6 +1275,12 @@
                             emptyPositions.push({ x, z });
                         }
                     }
+                }
+                
+                // 检查是否还有空位
+                if (emptyPositions.length === 0) {
+                    // 棋盘已满，返回平局得分
+                    return { x: -1, z: -1, score: 0 };
                 }
                 
                 if (isMaximizing) {
